@@ -1,293 +1,295 @@
+import asyncio
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Updater, CommandHandler, CallbackContext, CallbackQueryHandler
-from flask import Flask, render_template_string
-import threading
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from telegram.ext import Application, CommandHandler, ContextTypes
 import sqlite3
-import os
+import random
+import string
 
-# कॉन्फिगरेशन
-TOKEN = "8373517379:AAH-zX7pDDzMeVAtLdNvBUsHvsIg4aEZy3o"
-
-ADMIN_ID 7470248597
-ADMIN_ID = 7459795138
-REWARD_COINS = 100
-REQUIRED_GROUPS = [
-    {"name": "Bingyt Bot", "url": "https://t.me/Bingyt_bot"},
-    {"name": "Boom Up", "url": "https://t.me/boomupbot10"},
-    {"name": "Free Subscribe", "url": "https://t.me/FreesubscribeYouTube2k"}
-]
-
-# डेटाबेस सेटअप
-conn = sqlite3.connect('bot_db.sqlite', check_same_thread=False)
-cursor = conn.cursor()
-
-# टेबल्स बनाएं
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    coins INTEGER DEFAULT 0,
-    referrals INTEGER DEFAULT 0,
-    joined_all_groups INTEGER DEFAULT 0,
-    join_date TEXT DEFAULT CURRENT_TIMESTAMP
-)
-''')
-
-cursor.execute('''
-CREATE TABLE IF NOT EXISTS referrals (
-    referral_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    referrer_id INTEGER,
-    referred_id INTEGER,
-    date TEXT DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (referrer_id) REFERENCES users (user_id),
-    FOREIGN KEY (referred_id) REFERENCES users (user_id)
-)
-''')
-conn.commit()
-
-# Flask वेब डैशबोर्ड
-app = Flask(__name__)
-
-@app.route('/')
-def dashboard():
-    # टॉप रेफरर्स
-    cursor.execute('''
-        SELECT username, referrals, coins 
-        FROM users 
-        ORDER BY referrals DESC 
-        LIMIT 10
-    ''')
-    top_referrers = cursor.fetchall()
-    
-    # टोटल स्टैट्स
-    cursor.execute('SELECT COUNT(*) FROM users')
-    total_users = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT COUNT(*) FROM users WHERE joined_all_groups=1')
-    active_users = cursor.fetchone()[0]
-    
-    cursor.execute('SELECT COUNT(*) FROM referrals')
-    total_referrals = cursor.fetchone()[0]
-    
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Referral Bot Dashboard</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 20px; }}
-            .card {{ background: #f5f5f5; padding: 20px; border-radius: 10px; margin: 10px 0; }}
-            table {{ width: 100%; border-collapse: collapse; }}
-            th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #ddd; }}
-            .btn {{ background: #0088cc; color: white; padding: 10px 15px; text-decoration: none; border-radius: 5px; }}
-        </style>
-    </head>
-    <body>
-        <h1>🤖 Referral Bot Dashboard</h1>
-        
-        <div class="card">
-            <h3>📊 स्टैटिस्टिक्स</h3>
-            <p>कुल यूजर्स: {total_users}</p>
-            <p>एक्टिव यूजर्स: {active_users}</p>
-            <p>कुल रेफरल्स: {total_referrals}</p>
-        </div>
-        
-        <h2>🏆 टॉप 10 रेफरर्स</h2>
-        <table>
-            <tr>
-                <th>रैंक</th>
-                <th>यूजरनेम</th>
-                <th>रेफरल्स</th>
-                <th>कॉइन्स</th>
-            </tr>
-            {% for i, user in enumerate(top_referrers, 1) %}
-            <tr>
-                <td>{i}</td>
-                <td>{{user[0] or 'Anonymous'}}</td>
-                <td>{{user[1]}}</td>
-                <td>{{user[2]}}</td>
-            </tr>
-            {% endfor %}
-        </table>
-        
-        <div style="margin-top: 20px;">
-            <a href="https://t.me/share/url?url=https://t.me/your_bot&text=Join%20this%20awesome%20bot!" class="btn">
-                📢 बोट शेयर करें
-            </a>
-        </div>
-    </body>
-    </html>
-    """
-    return render_template_string(html, enumerate=enumerate, top_referrers=top_referrers)
-
-def run_flask():
-    app.run(host='0.0.0.0', port=5000)
-
-# Flask थ्रेड स्टार्ट करें
-flask_thread = threading.Thread(target=run_flask)
-flask_thread.daemon = True
-flask_thread.start()
-
-# लॉगिंग
+# लॉगिंग कॉन्फ़िगर करें
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     level=logging.INFO
 )
-logger = logging.getLogger(__name__)
 
-async def check_groups(user_id, context):
-    try:
-        for group in REQUIRED_GROUPS:
-            group_username = group["url"].split('/')[-1]
-            chat_member = await context.bot.get_chat_member(f"@{group_username}", user_id)
-            if chat_member.status in ['left', 'kicked']:
-                return False
-        return True
-    except Exception as e:
-        logger.error(f"Error checking groups: {e}")
-        return False
+# कॉन्फ़िगरेशन
+BOT_TOKEN = "7978191312:AAFyWVkBruuR42HTuTd_sQxFaKHBrre0VWw"  # अपना बॉट टोकन यहाँ डालें
+ADMIN_ID = 7459795138  # अपना एडमिन ID
+WEB_APP_URL = "https://0e8b2f63-6f1c-4921-9feb-42115ce5360f-00-2amqt62lj9glu.picard.replit.dev"
+GROUP_ID = "@boomupbot10"  # अपना ग्रुप यूजरनेम या ID (-100...)
 
-async def start(update: Update, context: CallbackContext):
-    user = update.effective_user
-    referral_link = f"https://t.me/{context.bot.username}?start={user.id}"
+# डेटाबेस इनिशियलाइज़ेशन
+def init_db():
+    conn = sqlite3.connect('db.sqlite')
+    cursor = conn.cursor()
     
-    # रेफरल चेक
-    if context.args:
-        referrer_id = int(context.args[0])
-        if referrer_id != user.id:  # खुद को रेफर नहीं कर सकता
-            cursor.execute('SELECT 1 FROM users WHERE user_id=?', (user.id,))
-            if not cursor.fetchone():
-                # नया यूजर
-                cursor.execute('''
-                    INSERT INTO users (user_id, username, coins)
-                    VALUES (?, ?, ?)
-                ''', (user.id, user.username or str(user.id), REWARD_COINS))
-                
-                # रेफरल रिकॉर्ड
-                cursor.execute('''
-                    INSERT INTO referrals (referrer_id, referred_id)
-                    VALUES (?, ?)
-                ''', (referrer_id, user.id))
-                
-                # रेफरर को इनाम
+    # यूजर्स टेबल
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id TEXT UNIQUE,
+        username TEXT,
+        first_name TEXT,
+        last_name TEXT,
+        coin_balance INTEGER DEFAULT 0,
+        today_coins INTEGER DEFAULT 0,
+        total_coins_earned INTEGER DEFAULT 0,
+        videos_watched INTEGER DEFAULT 0,
+        referral_code TEXT UNIQUE,
+        referred_by TEXT,
+        is_group_member BOOLEAN DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # रेफरल्स टेबल
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS referrals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        referrer_id INTEGER,
+        referred_user_id INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (referrer_id) REFERENCES users (id),
+        FOREIGN KEY (referred_user_id) REFERENCES users (id)
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# रेफरल कोड जनरेटर
+def generate_referral_code():
+    return f"REF{random.randint(1000, 9999)}{random.choice(string.ascii_uppercase)}{random.choice(string.ascii_uppercase)}"
+
+# यूजर मैनेजमेंट
+def get_or_create_user(telegram_id, username=None, first_name=None, last_name=None, referral_code=None):
+    conn = sqlite3.connect('db.sqlite')
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT * FROM users WHERE telegram_id = ?', (str(telegram_id),))
+    user = cursor.fetchone()
+    
+    if not user:
+        ref_code = generate_referral_code()
+        cursor.execute('''
+            INSERT INTO users (telegram_id, username, first_name, last_name, referral_code, referred_by)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (str(telegram_id), username, first_name, last_name, ref_code, referral_code))
+        
+        user_id = cursor.lastrowid
+        
+        # रेफरल बोनस
+        if referral_code:
+            cursor.execute('SELECT id FROM users WHERE referral_code = ?', (referral_code,))
+            referrer = cursor.fetchone()
+            
+            if referrer:
+                referrer_id = referrer[0]
                 cursor.execute('''
                     UPDATE users 
-                    SET coins = coins + ?, referrals = referrals + 1 
-                    WHERE user_id = ?
-                ''', (REWARD_COINS, referrer_id))
-                conn.commit()
+                    SET coin_balance = coin_balance + 100, 
+                        total_coins_earned = total_coins_earned + 100
+                    WHERE id = ?
+                ''', (referrer_id,))
                 
-                await update.message.reply_text(
-                    f"🎉 आपको {REWARD_COINS} कॉइन्स मिले हैं रेफरल बोनस के रूप में!"
-                )
-                
-                # रेफरर को नोटिफिकेशन
-                try:
-                    await context.bot.send_message(
-                        chat_id=referrer_id,
-                        text=f"🎊 {user.username or user.id} ने आपके रेफरल लिंक से जॉइन किया!\n"
-                             f"आपको {REWARD_COINS} कॉइन्स मिले हैं!"
-                    )
-                except Exception as e:
-                    logger.error(f"Could not notify referrer: {e}")
-    
-    # यूजर रजिस्टर करें
-    cursor.execute('''
-        INSERT OR IGNORE INTO users (user_id, username) 
-        VALUES (?, ?)
-    ''', (user.id, user.username or str(user.id)))
-    conn.commit()
-    
-    # ग्रुप्स चेक
-    has_joined = await check_groups(user.id, context)
-    
-    if has_joined:
-        cursor.execute('UPDATE users SET joined_all_groups=1 WHERE user_id=?', (user.id,))
+                cursor.execute('''
+                    INSERT INTO referrals (referrer_id, referred_user_id)
+                    VALUES (?, ?)
+                ''', (referrer_id, user_id))
+        
         conn.commit()
-        
-        # बैलेंस चेक
-        cursor.execute('SELECT coins FROM users WHERE user_id=?', (user.id,))
-        coins = cursor.fetchone()[0]
-        
-        keyboard = [
-            [InlineKeyboardButton("📢 इनवाइट फ्रेंड्स", 
-             url=f"https://t.me/share/url?url={referral_link}&text=Join%20this%20awesome%20bot%20and%20get%20{REWARD_COINS}%20coins!")],
-            [InlineKeyboardButton("💰 मेरे कॉइन्स", callback_data="balance")],
-            [InlineKeyboardButton("🌐 वेब डैशबोर्ड", url="http://your-server-ip:5000")]
-        ]
-        
-        await update.message.reply_text(
-            f"👋 नमस्ते {user.first_name}!\n\n"
-            f"🔗 आपका रेफरल लिंक:\n<code>{referral_link}</code>\n\n"
-            f"💰 आपके कॉइन्स: <b>{coins}</b>\n\n"
-            f"दोस्तों को इनवाइट करके {REWARD_COINS} कॉइन्स प्रति रेफरल कमाएं!",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='HTML'
-        )
-    else:
-        # ग्रुप जॉइन करने के लिए बटन्स
-        buttons = []
-        for group in REQUIRED_GROUPS:
-            buttons.append([InlineKeyboardButton(
-                f"जॉइन {group['name']}", 
-                url=group["url"]
-            )])
-        
-        buttons.append([InlineKeyboardButton(
-            "✅ मैंने जॉइन कर लिया", 
-            callback_data="check_groups"
-        )])
-        
-        await update.message.reply_text(
-            "⚠️ बोट का उपयोग करने के लिए कृपया निम्न ग्रुप्स जॉइन करें:\n\n" +
-            "\n".join([f"• {group['url']}" for group in REQUIRED_GROUPS]) +
-            "\n\nसभी ग्रुप्स जॉइन करने के बाद नीचे बटन दबाएं:",
-            reply_markup=InlineKeyboardMarkup(buttons),
-            disable_web_page_preview=True
-        )
+        cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+        user = cursor.fetchone()
+    
+    conn.close()
+    return user
 
-async def button_handler(update: Update, context: CallbackContext):
-    query = update.callback_query
-    await query.answer()
+# /start कमांड
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    referral_code = context.args[0] if context.args else None
     
-    if query.data == "balance":
-        cursor.execute('SELECT coins FROM users WHERE user_id=?', (query.from_user.id,))
-        coins = cursor.fetchone()[0]
-        
-        await query.edit_message_text(
-            f"💰 आपके पास <b>{coins} कॉइन्स</b> हैं!\n\n"
-            f"अधिक कॉइन्स कमाने के लिए दोस्तों को इनवाइट करें।",
-            parse_mode='HTML'
-        )
+    db_user = get_or_create_user(
+        user.id, 
+        user.username, 
+        user.first_name, 
+        user.last_name, 
+        referral_code
+    )
     
-    elif query.data == "check_groups":
-        has_joined = await check_groups(query.from_user.id, context)
+    welcome_message = f"""
+🎬 *Video Coin Earner Bot में आपका स्वागत है!* 🎬
+
+नमस्ते {user.first_name}! 
+
+📹 *वीडियो देखें और कॉइन कमाएं:*
+• प्रत्येक वीडियो के लिए 30 कॉइन्स
+• दैनिक लिमिट: 900 कॉइन्स
+• 100+ भारतीय YouTube वीडियो
+
+👥 *रेफरल सिस्टम:*
+• दोस्तों को इनवाइट करें
+• प्रत्येक नए यूजर के लिए 100 कॉइन्स
+
+🔗 *URL जमा करें:*
+• अपना YouTube वीडियो जमा करें
+• 200 कॉइन्स पाएं
+
+⚠️ *महत्वपूर्ण:* बॉट का उपयोग करने के लिए पहले हमारे ग्रुप में जॉइन करना आवश्यक है।
+
+आपका रेफरल कोड: `{db_user[9]}`
+"""
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("🚀 ऐप लॉन्च करें", web_app=WebAppInfo(url=WEB_APP_URL)),
+            InlineKeyboardButton("👥 ग्रुप जॉइन करें", url=f"https://t.me/{GROUP_ID.replace('@', '')}")
+        ],
+        [
+            InlineKeyboardButton(
+                "📢 दोस्तों को इनवाइट करें", 
+                switch_inline_query=f"🎬 Video Coin Earner Bot से कॉइन्स कमाएं! {WEB_APP_URL}?ref={db_user[9]}"
+            )
+        ]
+    ]
+    
+    await update.message.reply_text(
+        welcome_message, 
+        parse_mode='Markdown', 
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# /verify कमांड
+async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    
+    try:
+        chat_member = await context.bot.get_chat_member(GROUP_ID, user.id)
+        is_member = chat_member.status in ['member', 'administrator', 'creator']
         
-        if has_joined:
-            cursor.execute('UPDATE users SET joined_all_groups=1 WHERE user_id=?', (query.from_user.id,))
+        if is_member:
+            conn = sqlite3.connect('db.sqlite')
+            cursor = conn.cursor()
+            cursor.execute('UPDATE users SET is_group_member = 1 WHERE telegram_id = ?', (str(user.id),))
             conn.commit()
+            conn.close()
             
-            await query.edit_message_text(
-                "🎉 सत्यापन पूरा हुआ! अब आप बोट का पूरा उपयोग कर सकते हैं।\n\n"
-                "/start टाइप करके मुख्य मेनू देखें।"
+            await update.message.reply_text(
+                '✅ वेरिफिकेशन सफल! अब आप कॉइन्स कमा सकते हैं।',
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚀 ऐप लॉन्च करें", web_app=WebAppInfo(url=WEB_APP_URL))]
+                ])
             )
         else:
-            await query.answer(
-                "❌ आप अभी भी सभी ग्रुप्स में नहीं हैं। कृपया सभी लिंक्स पर क्लिक करके जॉइन करें।",
-                show_alert=True
+            await update.message.reply_text(
+                '❌ कृपया पहले ग्रुप जॉइन करें।',
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("👥 ग्रुप जॉइन करें", url=f"https://t.me/{GROUP_ID.replace('@', '')}")]
+                ])
             )
+    except Exception as e:
+        logging.error(f"Verify error: {e}")
+        await update.message.reply_text('वेरिफिकेशन में त्रुटि। बाद में प्रयास करें।')
 
-def main():
-    updater = Updater(TOKEN)
-    dispatcher = updater.dispatcher
+# /wallet कमांड
+async def wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
     
-    dispatcher.add_handler(CommandHandler("start", start))
-    dispatcher.add_handler(CallbackQueryHandler(button_handler))
+    conn = sqlite3.connect('db.sqlite')
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM users WHERE telegram_id = ?', (str(user.id),))
+    db_user = cursor.fetchone()
     
-    updater.start_polling()
-    logger.info("बोट चल रहा है...")
-    updater.idle()
+    if not db_user:
+        await update.message.reply_text('कृपया पहले /start कमांड का उपयोग करें।')
+        return
+    
+    cursor.execute('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', (db_user[0],))
+    referral_count = cursor.fetchone()[0]
+    conn.close()
+    
+    wallet_message = f"""
+💰 *आपका वॉलेट*
+
+🪙 उपलब्ध कॉइन्स: {db_user[5]}
+📊 कुल कमाए गए: {db_user[7]}
+📹 देखे गए वीडियो: {db_user[8]}
+👥 सफल रेफरल्स: {referral_count}
+📅 आज कमाए गए: {db_user[6]}/900
+"""
+    
+    await update.message.reply_text(
+        wallet_message, 
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🚀 ऐप लॉन्च करें", web_app=WebAppInfo(url=WEB_APP_URL))]
+        )
+    )
+
+# /referral कमांड
+async def referral(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    
+    conn = sqlite3.connect('db.sqlite')
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM users WHERE telegram_id = ?', (str(user.id),))
+    db_user = cursor.fetchone()
+    
+    if not db_user:
+        await update.message.reply_text('कृपया पहले /start कमांड का उपयोग करें।')
+        return
+    
+    cursor.execute('SELECT COUNT(*) FROM referrals WHERE referrer_id = ?', (db_user[0],))
+    referral_count = cursor.fetchone()[0]
+    conn.close()
+    
+    referral_message = f"""
+👥 *रेफरल सिस्टम*
+
+🔗 आपका रेफरल लिंक:
+`{WEB_APP_URL}?ref={db_user[9]}`
+
+📊 आपके स्टेट्स:
+• कुल रेफरल्स: {referral_count}
+• रेफरल से कमाया: {referral_count * 100} कॉइन्स
+"""
+    
+    await update.message.reply_text(
+        referral_message, 
+        parse_mode='Markdown',
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("📤 शेयर करें", switch_inline_query=f"कॉइन्स कमाएं: {WEB_APP_URL}?ref={db_user[9]}")],
+            [InlineKeyboardButton("🚀 ऐप लॉन्च करें", web_app=WebAppInfo(url=WEB_APP_URL))]
+        )
+    )
+
+# /help कमांड
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    help_text = """
+🎬 *बॉट कमांड्स*
+
+/start - बॉट शुरू करें
+/wallet - वॉलेट देखें
+/referral - रेफरल जानकारी
+/verify - ग्रुप मेंबरशिप वेरिफाई करें
+/help - सहायता
+"""
+    await update.message.reply_text(help_text, parse_mode='Markdown')
+
+# मेन फंक्शन
+def main() -> None:
+    init_db()  # डेटाबेस इनिशियलाइज़
+    
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # कमांड हैंडलर्स
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("verify", verify))
+    app.add_handler(CommandHandler("wallet", wallet))
+    app.add_handler(CommandHandler("referral", referral))
+    app.add_handler(CommandHandler("help", help_command))
+    
+    # बॉट स्टार्ट करें
+    app.run_polling()
 
 if __name__ == '__main__':
     main()
